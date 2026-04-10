@@ -1,9 +1,9 @@
 {
-    "version": "1.1.0",
+    "version": "1.2.0-test",
     "download_url": "https://github.com/faustorm/pbn-publisher/releases/download/v1.1.0/pbn-publisher.zip",
     "requires": "6.0",
     "tested": "6.7",
     "homepage": "https://pangostudio.com",
-    "description": "Plugin de publicación remota para la PBN de Pango Studio. Incluye endpoints REST personalizados, metadatos SEO y auto-actualización desde GitHub.",
-    "changelog": "<h4>1.1.0</h4><ul><li>Auto-actualización desde GitHub</li><li>Versión dinámica en endpoint /info</li></ul><h4>1.0.0</h4><ul><li>Lanzamiento inicial</li><li>Endpoints: info, stats, publish, bulk-publish</li><li>Campos meta: pbn_source, pbn_focus_keyword, pbn_meta_description</li></ul>"
+    "description": "Plugin de publicaci\u00c3\u00b3n remota para la PBN de Pango Studio. Incluye endpoints REST personalizados, metadatos SEO y auto-actualizaci\u00c3\u00b3n desde GitHub.",
+    "changelog": "<h4>1.2.0-test</h4><ul><li>Test de auto-actualizaci\u00f3n</li></ul><h4>1.1.0</h4><ul><li>Auto-actualizaci\u00c3\u00b3n desde GitHub</li><li>Versi\u00c3\u00b3n din\u00c3\u00a1mica en endpoint /info</li></ul><h4>1.0.0</h4><ul><li>Lanzamiento inicial</li><li>Endpoints: info, stats, publish, bulk-publish</li><li>Campos meta: pbn_source, pbn_focus_keyword, pbn_meta_description</li></ul>"
 }
