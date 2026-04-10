@@ -3,7 +3,7 @@
  * Plugin Name: PBN Publisher
  * Description: Mejoras en la API REST de WordPress para publicación remota desde la PBN.
  *              Añade endpoints personalizados y metadatos para gestión centralizada.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: Fausto
  * Text Domain: pbn-publisher
  */
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('PBN_PUBLISHER_VERSION', '1.1.0');
+define('PBN_PUBLISHER_VERSION', '1.2.0');
 define('PBN_PUBLISHER_SLUG', 'pbn-publisher/pbn-publisher.php');
 define('PBN_PUBLISHER_UPDATE_URL', 'https://raw.githubusercontent.com/faustorm/pbn-publisher/main/update-info.json');
 
@@ -26,12 +26,26 @@ class PBN_Publisher {
         add_filter('site_transient_update_plugins', [$this, 'check_for_update']);
         add_filter('plugins_api', [$this, 'plugin_info'], 20, 3);
         add_action('upgrader_process_complete', [$this, 'after_update'], 10, 2);
+
+        // Auto-instalar actualizaciones sin intervención
+        add_filter('auto_update_plugin', function ($update, $item) {
+            return (isset($item->slug) && $item->slug === 'pbn-publisher') ? true : $update;
+        }, 10, 2);
     }
 
     /**
      * Registra endpoints personalizados para la PBN.
      */
     public function registrar_endpoints() {
+
+        // GET /wp-json/pbn/v1/check-update — Fuerza comprobación de actualización (debug)
+        register_rest_route('pbn/v1', '/check-update', [
+            'methods'  => 'GET',
+            'callback' => [$this, 'endpoint_check_update'],
+            'permission_callback' => function () {
+                return current_user_can('manage_options');
+            },
+        ]);
 
         // GET /wp-json/pbn/v1/info — Información del blog para el índice
         register_rest_route('pbn/v1', '/info', [
@@ -238,6 +252,47 @@ class PBN_Publisher {
             return ['id' => $tag->term_id, 'name' => $tag->name, 'count' => $tag->count];
         }, $tags);
     }
+    /**
+     * Fuerza comprobación de actualización y devuelve diagnóstico.
+     */
+    public function endpoint_check_update() {
+        // Borrar transient para forzar consulta fresca
+        delete_transient('pbn_publisher_update_info');
+
+        // Forzar refresco del transient de plugins de WordPress
+        delete_site_transient('update_plugins');
+
+        // Consultar GitHub directamente
+        $response = wp_remote_get(PBN_PUBLISHER_UPDATE_URL, [
+            'timeout' => 10,
+            'headers' => ['Accept' => 'application/json'],
+        ]);
+
+        $result = [
+            'current_version' => PBN_PUBLISHER_VERSION,
+            'update_url' => PBN_PUBLISHER_UPDATE_URL,
+            'plugin_slug' => PBN_PUBLISHER_SLUG,
+        ];
+
+        if (is_wp_error($response)) {
+            $result['error'] = $response->get_error_message();
+            $result['can_reach_github'] = false;
+        } else {
+            $code = wp_remote_retrieve_response_code($response);
+            $body = wp_remote_retrieve_body($response);
+            $data = json_decode($body);
+
+            $result['http_status'] = $code;
+            $result['can_reach_github'] = ($code === 200);
+            $result['remote_version'] = $data->version ?? null;
+            $result['download_url'] = $data->download_url ?? null;
+            $result['needs_update'] = isset($data->version) ? version_compare(PBN_PUBLISHER_VERSION, $data->version, '<') : false;
+            $result['transients_cleared'] = true;
+        }
+
+        return rest_ensure_response($result);
+    }
+
     // =========================================================================
     // AUTO-UPDATE DESDE GITHUB
     // =========================================================================
