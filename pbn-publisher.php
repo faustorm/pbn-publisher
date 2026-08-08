@@ -3,7 +3,7 @@
  * Plugin Name: PBN Publisher
  * Description: Mejoras en la API REST de WordPress para publicación remota desde la PBN.
  *              Añade endpoints personalizados y metadatos para gestión centralizada.
- * Version: 1.2.0
+ * Version: 1.4.0
  * Author: Fausto
  * Text Domain: pbn-publisher
  */
@@ -12,7 +12,12 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('PBN_PUBLISHER_VERSION', '1.3.0');
+// Componentes de contenido disponibles para toda la red.
+foreach (glob(__DIR__ . '/inc/*.php') as $__pbn_inc) {
+    require_once $__pbn_inc;
+}
+
+define('PBN_PUBLISHER_VERSION', '1.4.0');
 define('PBN_PUBLISHER_SLUG', 'pbn-publisher/pbn-publisher.php');
 define('PBN_PUBLISHER_UPDATE_URL', 'https://raw.githubusercontent.com/faustorm/pbn-publisher/main/update-info.json');
 

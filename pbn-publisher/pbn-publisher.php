@@ -3,7 +3,7 @@
  * Plugin Name: PBN Publisher
  * Description: Mejoras en la API REST de WordPress para publicación remota desde la PBN.
  *              Añade endpoints personalizados y metadatos para gestión centralizada.
- * Version: 1.2.0
+ * Version: 1.4.0
  * Author: Fausto
  * Text Domain: pbn-publisher
  */
@@ -12,7 +12,12 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('PBN_PUBLISHER_VERSION', '1.2.0');
+// Componentes de contenido disponibles para toda la red.
+foreach (glob(__DIR__ . '/inc/*.php') as $__pbn_inc) {
+    require_once $__pbn_inc;
+}
+
+define('PBN_PUBLISHER_VERSION', '1.4.0');
 define('PBN_PUBLISHER_SLUG', 'pbn-publisher/pbn-publisher.php');
 define('PBN_PUBLISHER_UPDATE_URL', 'https://raw.githubusercontent.com/faustorm/pbn-publisher/main/update-info.json');
 
@@ -398,3 +403,165 @@ class PBN_Publisher {
 }
 
 new PBN_Publisher();
+
+// =========================================================================
+// INDEXNOW — Notificación automática a Bing/Yandex/DuckDuckGo
+// =========================================================================
+
+/**
+ * Genera y almacena una clave IndexNow única para este sitio.
+ * Se crea una vez y se reutiliza.
+ */
+function pbn_indexnow_get_key() {
+    $key = get_option( 'pbn_indexnow_key' );
+    if ( ! $key ) {
+        $key = wp_generate_password( 32, false, false );
+        update_option( 'pbn_indexnow_key', $key, true );
+    }
+    return $key;
+}
+
+/**
+ * Sirve el archivo de verificación de la clave IndexNow.
+ * IndexNow requiere que exista [key].txt en la raíz del dominio.
+ * En vez de crear un archivo físico, lo servimos vía rewrite.
+ */
+function pbn_indexnow_serve_key() {
+    $key = pbn_indexnow_get_key();
+    $request = trim( $_SERVER['REQUEST_URI'] ?? '', '/' );
+    if ( $request === $key . '.txt' ) {
+        header( 'Content-Type: text/plain; charset=utf-8' );
+        echo esc_html( $key );
+        exit;
+    }
+}
+add_action( 'init', 'pbn_indexnow_serve_key', 1 );
+
+/**
+ * Envía una URL a IndexNow cuando un post se publica.
+ * Se activa en transición de cualquier estado a 'publish'.
+ */
+function pbn_indexnow_on_publish( $new_status, $old_status, $post ) {
+    if ( 'publish' !== $new_status ) {
+        return;
+    }
+    if ( $old_status === $new_status && $old_status === 'publish' ) {
+        return; // Solo en publicación nueva o scheduled→publish, no en updates
+    }
+    if ( ! in_array( $post->post_type, array( 'post', 'page', 'pango_partner' ), true ) ) {
+        return;
+    }
+
+    $url = get_permalink( $post->ID );
+    if ( ! $url ) {
+        return;
+    }
+
+    $key  = pbn_indexnow_get_key();
+    $host = wp_parse_url( home_url(), PHP_URL_HOST );
+
+    $body = wp_json_encode( array(
+        'host'        => $host,
+        'key'         => $key,
+        'keyLocation' => home_url( '/' . $key . '.txt' ),
+        'urlList'     => array( $url ),
+    ) );
+
+    $response = wp_remote_post( 'https://api.indexnow.org/indexnow', array(
+        'timeout' => 10,
+        'headers' => array( 'Content-Type' => 'application/json; charset=utf-8' ),
+        'body'    => $body,
+    ) );
+
+    $code = is_wp_error( $response ) ? 'error' : wp_remote_retrieve_response_code( $response );
+
+    // Log para debug (se puede ver en /wp-json/pbn/v1/indexnow-log)
+    $log = get_option( 'pbn_indexnow_log', array() );
+    $log[] = array(
+        'url'    => $url,
+        'status' => $code,
+        'time'   => gmdate( 'Y-m-d H:i:s' ),
+        'error'  => is_wp_error( $response ) ? $response->get_error_message() : null,
+    );
+    // Mantener solo los últimos 50 registros
+    $log = array_slice( $log, -50 );
+    update_option( 'pbn_indexnow_log', $log, false );
+}
+add_action( 'transition_post_status', 'pbn_indexnow_on_publish', 10, 3 );
+
+/**
+ * Endpoint REST para ver el log de IndexNow y el estado de la clave.
+ * GET /wp-json/pbn/v1/indexnow-status
+ */
+function pbn_indexnow_register_endpoints() {
+    register_rest_route( 'pbn/v1', '/indexnow-status', array(
+        'methods'             => 'GET',
+        'callback'            => 'pbn_indexnow_status_endpoint',
+        'permission_callback' => function () {
+            return current_user_can( 'edit_posts' );
+        },
+    ) );
+
+    // POST /wp-json/pbn/v1/indexnow-submit — enviar URL manualmente
+    register_rest_route( 'pbn/v1', '/indexnow-submit', array(
+        'methods'             => 'POST',
+        'callback'            => 'pbn_indexnow_submit_endpoint',
+        'permission_callback' => function () {
+            return current_user_can( 'publish_posts' );
+        },
+        'args' => array(
+            'url' => array( 'required' => true, 'type' => 'string' ),
+        ),
+    ) );
+}
+add_action( 'rest_api_init', 'pbn_indexnow_register_endpoints' );
+
+function pbn_indexnow_status_endpoint() {
+    $key = pbn_indexnow_get_key();
+    $log = get_option( 'pbn_indexnow_log', array() );
+    return rest_ensure_response( array(
+        'key'              => $key,
+        'key_url'          => home_url( '/' . $key . '.txt' ),
+        'total_submitted'  => count( $log ),
+        'last_submissions' => array_slice( array_reverse( $log ), 0, 10 ),
+        'plugin_version'   => PBN_PUBLISHER_VERSION,
+    ) );
+}
+
+function pbn_indexnow_submit_endpoint( $request ) {
+    $url  = esc_url_raw( $request['url'] );
+    $key  = pbn_indexnow_get_key();
+    $host = wp_parse_url( home_url(), PHP_URL_HOST );
+
+    $body = wp_json_encode( array(
+        'host'        => $host,
+        'key'         => $key,
+        'keyLocation' => home_url( '/' . $key . '.txt' ),
+        'urlList'     => array( $url ),
+    ) );
+
+    $response = wp_remote_post( 'https://api.indexnow.org/indexnow', array(
+        'timeout' => 10,
+        'headers' => array( 'Content-Type' => 'application/json; charset=utf-8' ),
+        'body'    => $body,
+    ) );
+
+    $code = is_wp_error( $response ) ? 'error' : wp_remote_retrieve_response_code( $response );
+
+    $log = get_option( 'pbn_indexnow_log', array() );
+    $log[] = array(
+        'url'    => $url,
+        'status' => $code,
+        'time'   => gmdate( 'Y-m-d H:i:s' ),
+        'manual' => true,
+    );
+    $log = array_slice( $log, -50 );
+    update_option( 'pbn_indexnow_log', $log, false );
+
+    return rest_ensure_response( array(
+        'url'        => $url,
+        'status'     => $code,
+        'message'    => ( $code === 200 || $code === 202 ) ? 'URL enviada correctamente a IndexNow' : 'Error al enviar',
+        'response'   => is_wp_error( $response ) ? $response->get_error_message() : wp_remote_retrieve_body( $response ),
+    ) );
+}
