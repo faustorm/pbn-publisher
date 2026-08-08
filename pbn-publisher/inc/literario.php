@@ -103,6 +103,80 @@ add_action( 'update_option_pbn_lit_activo', 'pbn_lit_refresca_urls', 10, 2 );
 
 
 /* ============================================================
+ * Las fichas flojas no se indexan
+ * ============================================================ */
+
+/**
+ * Cuántos artículos tiene que reunir una ficha para merecer estar en el índice.
+ * Con uno solo, la página no aporta nada que no tenga ya el propio artículo: es
+ * una lista de un elemento. Sirve para navegar y para que un modelo vea la
+ * relación, pero no para que Google la ofrezca como resultado.
+ */
+function pbn_lit_minimo_para_indexar() {
+	return (int) apply_filters( 'pbn_lit_minimo_indexar', 2 );
+}
+
+/**
+ * ¿Estamos en una ficha con menos artículos de la cuenta?
+ */
+function pbn_lit_ficha_floja() {
+	if ( ! pbn_lit_activo() || ! is_tax( array( 'pbn_libro', 'pbn_autor' ) ) ) {
+		return false;
+	}
+	$t = get_queried_object();
+	return ( $t instanceof WP_Term ) && $t->count < pbn_lit_minimo_para_indexar();
+}
+
+/**
+ * Con Yoast puesto manda él: hay que decírselo por su filtro o pondría el suyo
+ * y saldrían dos etiquetas contradictorias en la misma página.
+ */
+function pbn_lit_yoast_noindex( $robots ) {
+	if ( pbn_lit_ficha_floja() ) {
+		$robots['index'] = 'noindex';
+	}
+	return $robots;
+}
+add_filter( 'wpseo_robots_array', 'pbn_lit_yoast_noindex' );
+
+/**
+ * Y si no hay Yoast, la ponemos nosotros.
+ */
+function pbn_lit_noindex_propio() {
+	if ( ! pbn_lit_ficha_floja() ) { return; }
+	if ( defined( 'WPSEO_VERSION' ) ) { return; }   // ya lo ha hecho Yoast
+	echo '<meta name="robots" content="noindex, follow">' . "\n";
+}
+add_action( 'wp_head', 'pbn_lit_noindex_propio', 1 );
+
+/**
+ * Fuera del sitemap también, que si no se le sigue ofreciendo al buscador.
+ */
+function pbn_lit_fuera_del_sitemap( $terms, $taxonomy ) {
+	if ( ! in_array( $taxonomy, array( 'pbn_libro', 'pbn_autor' ), true ) ) {
+		return $terms;
+	}
+	$minimo = pbn_lit_minimo_para_indexar();
+	return array_values( array_filter( $terms, function ( $t ) use ( $minimo ) {
+		return isset( $t->count ) && $t->count >= $minimo;
+	} ) );
+}
+add_filter( 'wpseo_sitemap_terms', 'pbn_lit_fuera_del_sitemap', 10, 2 );
+
+/**
+ * El sitemap del núcleo de WordPress va por otro sitio.
+ */
+function pbn_lit_fuera_del_sitemap_nucleo( $args, $taxonomy ) {
+	if ( in_array( $taxonomy, array( 'pbn_libro', 'pbn_autor' ), true ) ) {
+		$args['meta_query'] = array();          // por si acaso
+		$args['hide_empty'] = true;
+	}
+	return $args;
+}
+add_filter( 'wp_sitemaps_taxonomies_query_args', 'pbn_lit_fuera_del_sitemap_nucleo', 10, 2 );
+
+
+/* ============================================================
  * El bloque de libros y autores
  * ============================================================ */
 
