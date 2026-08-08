@@ -56,7 +56,9 @@ function pbn_preguntas_parsea( $texto ) {
 		} elseif ( preg_match( '/^R\s*[:.\-–]\s*(.+)$/u', $linea, $m ) ) {
 			if ( $actual ) { $actual[1] = trim( $m[1] ); }
 		} elseif ( $actual && '' !== $actual[1] ) {
-			$actual[1] .= "\n" . $linea;      // la respuesta sigue abajo
+			// La respuesta sigue abajo. Se une con un espacio y no con un salto:
+			// una respuesta escrita en cuatro líneas es un párrafo, no cuatro.
+			$actual[1] .= ' ' . $linea;
 		}
 	}
 	if ( $actual && '' !== $actual[1] ) { $pares[] = $actual; }
